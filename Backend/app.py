@@ -48,8 +48,11 @@ with app.app_context():
         __table__ = db.Table('CheckinDetails', db.metadata, autoload_with=db.engine)
 
 
-    class CheckOutDetails(db.Model):
-        __table__ = db.Table('CheckOutDetails', db.metadata, autoload_with=db.engine)
+    class CheckoutDetails(db.Model):
+        __table__ = db.Table('CheckoutDetails', db.metadata, autoload_with=db.engine)
+
+    class City(db.Model):
+        __table__ = db.Table('City', db.metadata, autoload_with=db.engine)
 
 
 # Function to handle C server communication
@@ -82,8 +85,12 @@ def handle_c_server_connection(connection, address):
                     response = login_staff(request)
                 elif request.get("action") == "find_hotel":
                     response = find_hotel(request)
-                elif request.get("action") == "get_booking_request_details":
-                    response = get_booking_request_details(request)
+                elif request.get("action") == "get_booking_request":
+                    response = get_booking_request()
+                elif request.get("action") == "get_check_in_details":
+                    response = get_check_in_details()
+                elif request.get("action") == "get_check_out_details":
+                    response = get_check_out_details()
                 else:
                     response = {"status": "error", "message": "Invalid action"}
 
@@ -512,7 +519,7 @@ def get_check_out_details():
 
         for booking in bookings:
             # Query the CheckoutDetails table for the current BookingID
-            checkout = CheckOutDetails.query.filter_by(BookingID=booking.BookingID).first()
+            checkout = CheckoutDetails.query.filter_by(BookingID=booking.BookingID).first()
 
             # If no checkout details are found, skip this booking
             if not checkout:
