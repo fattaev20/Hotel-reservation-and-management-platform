@@ -1,0 +1,4 @@
+get_check_in_details: Error handling C server connection: Object of type Decimal is not JSON serializable
+get_check_out_details: Error handling C server connection: Object of type Decimal is not JSON serializable
+approve_check_in_details: has to approve PaymentStatus column to Paid ( now it is changing Room status to Booked)
+

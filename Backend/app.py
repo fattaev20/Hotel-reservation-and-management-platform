@@ -3,11 +3,16 @@ import random
 import threading
 import json
 import datetime
-
+from sqlite3 import ProgrammingError
+from sqlalchemy.sql import text
+from datetime import date, datetime
+from decimal import Decimal
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 import pymysql
 import bcrypt
+from sqlalchemy import inspect, text
+from sqlalchemy.testing.plugin.plugin_base import logging
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:Az_20iz_07@localhost/hotel'
@@ -51,6 +56,7 @@ with app.app_context():
     class CheckoutDetails(db.Model):
         __table__ = db.Table('CheckoutDetails', db.metadata, autoload_with=db.engine)
 
+
     class City(db.Model):
         __table__ = db.Table('City', db.metadata, autoload_with=db.engine)
 
@@ -71,6 +77,7 @@ def handle_c_server_connection(connection, address):
 
             with app.app_context():  # Ensure Flask application context is active
                 # Route the request to appropriate handlers
+                # Registration functions
                 if request.get("action") == "register_guest":
                     response = register_guest(request)
                 elif request.get("action") == "register_guest_2":
@@ -85,12 +92,69 @@ def handle_c_server_connection(connection, address):
                     response = login_staff(request)
                 elif request.get("action") == "find_hotel":
                     response = find_hotel(request)
+
+                # Client functions
+                elif request.get("action") == "get_city":
+                    response = get_city()
+                elif request.get("action") == "get_hotels":
+                    response = get_hotels(request)
+
+
+                # Manager functions
                 elif request.get("action") == "get_booking_request":
                     response = get_booking_request()
+
+                elif request.get("action") == "get_booking_request_by_id":
+                    response = get_booking_request_by_id(request)
+
                 elif request.get("action") == "get_check_in_details":
                     response = get_check_in_details()
+
                 elif request.get("action") == "get_check_out_details":
                     response = get_check_out_details()
+
+                elif request.get("action") == "get_check_in_details_by_id":
+                    response = get_check_in_details_by_id(request)
+
+                elif request.get("action") == "get_check_out_details_by_id":
+                    response = get_check_out_details_by_id(request)
+
+                elif request.get("action") == "approve_booking_requests":
+                    response = approve_booking_requests(request)
+
+                elif request.get("action") == "approve_check_in_details":
+                    response = approve_check_in_details(request)
+
+                elif request.get("action") == "cancel_check_in":
+                    response = cancel_check_in(request)
+
+                elif request.get("action") == "approve_check_out_details":
+                    response = approve_check_out_details(request)
+
+                # Roomboy functions
+                elif request.get("action") == "get_room_details_for_room_boy":
+                    response = get_room_details_for_room_boy()
+
+                elif request.get("action") == "check_room":
+                    response = check_room(request)
+
+
+                # SysAdmin functions
+                elif request.get("action") == "get_table_details":
+                    response = get_table_details(request)
+
+                elif request.get("action") == "get_all_table_names":
+                    response = get_all_table_names()
+
+                elif request.get("action") == "insert_into_table":
+                    response = insert_into_table(request)
+
+                elif request.get("action") == "delete_from_table":
+                    response = delete_from_table(request)
+
+                elif request.get("action") == "update_table":
+                    response = update_table(request)
+
                 else:
                     response = {"status": "error", "message": "Invalid action"}
 
@@ -126,6 +190,16 @@ def start_tcp_server():
         print(f"Error in TCP server: {str(e)}")
     finally:
         server_socket.close()
+
+
+# Custom JSON encoder for handling non-serializable types
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()  # Convert dates to ISO format
+        elif isinstance(obj, Decimal):
+            return float(obj)  # Convert Decimal to float
+        return super().default(obj)
 
 
 # Flask handlers
@@ -352,206 +426,182 @@ def find_hotel(data):
         return {'status': 'error', 'message': str(e)}
 
 
-def get_booking_request_details(data):
-    # Ensure 'booking_id' is provided in the request data
-    booking_id = data.get('BookingID')
-    if not booking_id:
-        return {'status': 'error', 'message': 'Missing booking_id'}
-
+# Client Functions
+def get_city():
     try:
-        # Query the Booking table for the specified booking_id
-        booking = Booking.query.filter_by(BookingID=booking_id).first()
+        # Query the City table to get all cities
+        cities = City.query.all()
 
-        # Check if a booking with the given ID exists
-        if not booking:
-            return {'status': 'error', 'message': 'Booking not found'}
+        # If no cities are found, return an error message
+        if not cities:
+            return {'status': 'error', 'message': 'No cities found'}
 
-        # Prepare the booking details to be returned
-        booking_details = {
-            'booking_id': booking.BookingID,
-            'client_id': booking.ClientID,
-            'hotel_id': booking.HotelID,
-            'room_number': booking.RoomNumber,
-            'adults_number': booking.AdultsNumber,
-            'children_number': booking.ChildrenNumber,
-            'checkin_date': booking.CheckinDate.strftime('%Y-%m-%d'),
-            'checkout_date': booking.CheckoutDate.strftime('%Y-%m-%d'),
-            'total_price': float(booking.TotalPrice)
-        }
+        # Prepare the list of city names to be returned
+        city_names = [city.City for city in cities]
 
-        return {'status': 'success', 'booking_details': booking_details}
+        return {'status': 'success', 'cities': city_names}
 
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
 
 
-# Manager functions
+# Manager Functions
 def get_booking_request():
     try:
-        # Query all clients from the Client table
-        clients = Client.query.all()
+        # Query all bookings
+        bookings = Booking.query.all()
 
-        if not clients:
-            return {'status': 'error', 'message': 'No clients found'}
+        # Prepare the response data
+        booking_requests = []
 
-        booking_details_list = []
+        for booking in bookings:
+            # Get the client details
+            client = Client.query.filter_by(ClientID=booking.ClientID).first()
+            if not client:
+                continue  # Skip if client doesn't exist
 
-        for client in clients:
-            # Query the Booking table to get all bookings for the current client
-            bookings = Booking.query.filter_by(ClientID=client.ClientID).all()
+            # Get the check-in details
+            checkin_details = CheckinDetails.query.filter_by(BookingID=booking.BookingID).first()
+            payment_status = checkin_details.PaymentStatus if checkin_details else 'N/A'
 
-            if not bookings:
-                continue  # Skip this client if they have no bookings
-
-            for booking in bookings:
-                # Query the Payment table to get payment information for the booking
-                payment = Payment.query.filter_by(BookingID=booking.BookingID).first()
-                amount_paid = payment.amount if payment else 0
-
-                # Handle None values for duration and TotalPrice
-                duration = booking.duration if booking.duration is not None else 0
-                total_price_per_night = booking.TotalPrice if booking.TotalPrice is not None else 0
-
-                # Calculate total cost safely
-                try:
-                    total_cost = duration * total_price_per_night
-                except Exception as e:
-                    return {'status': 'error', 'message': f'Error calculating total cost: {str(e)}'}
-
-                # Prepare the booking details for this specific booking
-                booking_details = {
+            # Append the booking details to the response
+            booking_requests.append({
+                'BookingID': booking.BookingID,
+                'Client': {
                     'ClientID': client.ClientID,
-                    'ClientName': client.FullName,
+                    'FullName': client.FullName,
+                    'DateOfBirth': client.DateOfBirth.strftime('%Y-%m-%d') if client.DateOfBirth else 'N/A',
+                    'Address': client.Address,
                     'Phone': client.Phone,
-                    'CheckinDate': booking.CheckinDate.strftime('%Y-%m-%d') if booking.CheckinDate else 'N/A',
-                    'CheckoutDate': booking.CheckoutDate.strftime('%Y-%m-%d') if booking.CheckoutDate else 'N/A',
-                    'duration': duration,
-                    'AdultsNumber': booking.AdultsNumber if booking.AdultsNumber is not None else 0,
-                    'ChildrenNumber': booking.ChildrenNumber if booking.ChildrenNumber is not None else 0,
-                    'RoomNumber': booking.RoomNumber if booking.RoomNumber is not None else 'N/A',
-                    'typeID': booking.typeID if booking.typeID is not None else 'N/A',
-                    'totalCost': total_cost,
-                    'TotalPrice': amount_paid,
-                    'PaymentStatus': 'Paid in Full' if amount_paid >= total_cost else "Guest didn't pay full price"
-                }
-                booking_details_list.append(booking_details)
+                    'PassportSeries': client.PassportSeries,
+                    'Email': client.Email,
+                    'Username': client.Username
+                },
+                'HotelID': booking.HotelID,
+                'RoomNumber': booking.RoomNumber,
+                'AdultsNumber': booking.AdultsNumber,
+                'ChildrenNumber': booking.ChildrenNumber,
+                'CheckinDate': booking.CheckinDate.strftime('%Y-%m-%d') if booking.CheckinDate else 'N/A',
+                'CheckoutDate': booking.CheckoutDate.strftime('%Y-%m-%d') if booking.CheckoutDate else 'N/A',
+                'TotalPrice': float(booking.TotalPrice),
+                'Duration': float(booking.Duration) if booking.Duration else 0,
+                'PaymentStatus': payment_status
+            })
 
-        if not booking_details_list:
-            return {'status': 'error', 'message': 'No bookings found'}
-
-        return {'status': 'success', 'booking_details': booking_details_list}
+        # Return the response in JSON format
+        return {'status': 'success', 'booking_requests': booking_requests}
 
     except Exception as e:
-        return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
+        return {'status': 'error', 'message': str(e)}
+
+
+def get_booking_request_by_id(data):
+    """
+    Retrieve booking details by BookingID.
+
+    Parameters:
+        data (dict): A dictionary containing the BookingID.
+
+    Returns:
+        dict: A response with the status and booking details.
+    """
+    try:
+        # Extract the BookingID from the request data
+        booking_id = data.get('BookingID')
+        if not booking_id:
+            return {'status': 'error', 'message': 'BookingID is required'}
+
+        # Query the booking
+        booking = Booking.query.filter_by(BookingID=booking_id).first()
+        if not booking:
+            return {'status': 'error', 'message': 'Booking not found'}
+
+        # Query the client associated with the booking
+        client = Client.query.filter_by(ClientID=booking.ClientID).first()
+        if not client:
+            return {'status': 'error', 'message': 'Client not found'}
+
+        # Get the check-in details
+        checkin_details = CheckinDetails.query.filter_by(BookingID=booking.BookingID).first()
+        payment_status = checkin_details.PaymentStatus if checkin_details else 'N/A'
+
+        # Prepare the booking details
+        booking_request = {
+            'BookingID': booking.BookingID,
+            'Client': {
+                'ClientID': client.ClientID,
+                'FullName': client.FullName,
+                'DateOfBirth': client.DateOfBirth.strftime('%Y-%m-%d') if client.DateOfBirth else 'N/A',
+                'Address': client.Address,
+                'Phone': client.Phone,
+                'PassportSeries': client.PassportSeries,
+                'Email': client.Email,
+                'Username': client.Username
+            },
+            'HotelID': booking.HotelID,
+            'RoomNumber': booking.RoomNumber,
+            'AdultsNumber': booking.AdultsNumber,
+            'ChildrenNumber': booking.ChildrenNumber,
+            'CheckinDate': booking.CheckinDate.strftime('%Y-%m-%d') if booking.CheckinDate else 'N/A',
+            'CheckoutDate': booking.CheckoutDate.strftime('%Y-%m-%d') if booking.CheckoutDate else 'N/A',
+            'TotalPrice': float(booking.TotalPrice),
+            'Duration': float(booking.Duration) if booking.Duration else 0,
+            'PaymentStatus': payment_status
+        }
+
+        # Return the response in JSON format
+        return {'status': 'success', 'booking_request': booking_request}
+
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
 
 
 def get_check_in_details():
+    """
+    Retrieve all check-in details for all check-ins in the database.
+
+    Returns:
+        dict: A dictionary containing the status and all check-in details.
+    """
     try:
-        # Query all clients from the Client table
-        clients = Client.query.all()
+        # Retrieve all check-in details from the CheckinDetails table
+        checkin_details_list = CheckinDetails.query.all()
+        if not checkin_details_list:
+            return {'status': 'error', 'message': 'No check-in details found'}
 
-        if not clients:
-            return {'status': 'error', 'message': 'No clients found'}
+        all_checkin_details = []
 
-        booking_details_list = []
+        for checkin_details in checkin_details_list:
+            # Retrieve the associated booking
+            booking = Booking.query.filter_by(BookingID=checkin_details.BookingID).first()
+            if not booking:
+                continue  # Skip if no booking is found for the check-in details
 
-        for client in clients:
-            # Query the Booking table to get all bookings for the current client
-            bookings = Booking.query.filter_by(ClientID=client.ClientID).all()
-
-            if not bookings:
-                continue  # Skip this client if they have no bookings
-
-            for booking in bookings:
-                # Query the Payment table to get payment information for the booking
-                payment = Payment.query.filter_by(BookingID=booking.BookingID).first()
-                amount_paid = payment.amount if payment else 0
-
-                # Handle None values for duration and TotalPrice
-                duration = booking.duration if booking.duration is not None else 0
-                total_price_per_night = booking.TotalPrice if booking.TotalPrice is not None else 0
-
-                # Calculate total cost safely
-                try:
-                    total_cost = duration * total_price_per_night
-                except Exception as e:
-                    return {'status': 'error', 'message': f'Error calculating total cost: {str(e)}'}
-
-                # Check if the guest has paid the full price
-                if amount_paid < total_cost:
-                    return {'status': 'error', 'message': "Guest didn't pay full price"}
-
-                # Prepare the check-in details for this specific booking
-                booking_details = {
-                    'ClientID': client.ClientID,
-                    'ClientName': client.FullName,
-                    'Phone': client.Phone,
-                    'CheckinDate': booking.CheckinDate.strftime('%Y-%m-%d') if booking.CheckinDate else 'N/A',
-                    'CheckoutDate': booking.CheckoutDate.strftime('%Y-%m-%d') if booking.CheckoutDate else 'N/A',
-                    'duration': duration,
-                    'AdultsNumber': booking.AdultsNumber if booking.AdultsNumber is not None else 0,
-                    'ChildrenNumber': booking.ChildrenNumber if booking.ChildrenNumber is not None else 0,
-                    'RoomNumber': booking.RoomNumber if booking.RoomNumber is not None else 'N/A',
-                    'typeID': booking.typeID if booking.typeID is not None else 'N/A',
-                    'totalCost': total_cost,
-                    'TotalPrice': amount_paid
-                }
-                booking_details_list.append(booking_details)
-
-        if not booking_details_list:
-            return {'status': 'error', 'message': 'No bookings found'}
-
-        return {'status': 'success', 'booking_details': booking_details_list}
-
-    except Exception as e:
-        return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
-
-
-def get_check_out_details():
-    try:
-        # Query all bookings from the Booking table
-        bookings = Booking.query.all()
-
-        if not bookings:
-            return {'status': 'error', 'message': 'No bookings found'}
-
-        checkout_details_list = []
-
-        for booking in bookings:
-            # Query the CheckoutDetails table for the current BookingID
-            checkout = CheckoutDetails.query.filter_by(BookingID=booking.BookingID).first()
-
-            # If no checkout details are found, skip this booking
-            if not checkout:
-                continue
-
-            # Query the Client table to get information for the ClientID associated with the booking
+            # Retrieve the associated client
             client = Client.query.filter_by(ClientID=booking.ClientID).first()
-
-            # If no client is found, skip this booking
             if not client:
-                continue
+                continue  # Skip if no client is found for the booking
 
-            # Query the Payment table to get payment information for the booking
+            # Retrieve payment information
             payment = Payment.query.filter_by(BookingID=booking.BookingID).first()
-            amount_paid = payment.amount if payment else 0
+            amount_paid = payment.Amount if payment else 0
 
-            # Calculate duration, total cost, and handle None values
-            duration = booking.duration if booking.duration is not None else 0
-            total_price_per_night = booking.TotalPrice if booking.TotalPrice is not None else 0
+            # Handle None values for duration and TotalPrice
+            duration = booking.Duration if booking.Duration is not None else 0
+            total_price = booking.TotalPrice if booking.TotalPrice is not None else 0
 
-            try:
-                total_cost = duration * total_price_per_night
-            except Exception as e:
-                return {'status': 'error', 'message': f'Error calculating total cost: {str(e)}'}
+            # Convert Decimal values to float for JSON serialization
+            total_price = float(total_price) if isinstance(total_price, Decimal) else total_price
+            amount_paid = float(amount_paid) if isinstance(amount_paid, Decimal) else amount_paid
 
-            # Query the Room table to get Room details
-            room = Room.query.filter_by(RoomNumber=checkout.RoomNumber).first()
+            # Calculate total cost
+            total_cost = total_price
 
-            room_type_id = room.TypeID if room else 'N/A'
+            # Determine the payment status
+            payment_status = "Paid" if amount_paid >= total_cost else "30% Paid"
 
-            # Prepare the full checkout details to be returned
-            checkout_details = {
+            # Prepare the check-in details for the response
+            checkin_info = {
                 # Client Details
                 'ClientID': client.ClientID,
                 'ClientName': client.FullName,
@@ -563,34 +613,303 @@ def get_check_out_details():
                 'duration': duration,
                 'AdultsNumber': booking.AdultsNumber if booking.AdultsNumber is not None else 0,
                 'ChildrenNumber': booking.ChildrenNumber if booking.ChildrenNumber is not None else 0,
-                'RoomNumber': booking.RoomNumber if booking.RoomNumber is not None else 'N/A',
-                'typeID': booking.typeID if booking.typeID is not None else room_type_id,
 
                 # Cost Details
                 'totalCost': total_cost,
                 'TotalPrice': amount_paid,
 
-                # Checkout Details
-                'CheckoutDetailsID': checkout.CheckoutDetailsID,
-                'MissingEquipment': checkout.MissingEquipment if checkout.MissingEquipment else 'N/A',
-                'BrokenEquipment': checkout.BrokenEquipment if checkout.BrokenEquipment else 'N/A',
-                'RestaurantFee': checkout.RestaurantFee if checkout.RestaurantFee is not None else 0,
-                'BarFee': checkout.BarFee if checkout.BarFee is not None else 0,
-                'AdditionalFee': checkout.AdditionalFee if checkout.AdditionalFee is not None else 0,
-                'RoomServiceFee': checkout.RoomServiceFee if checkout.RoomServiceFee is not None else 0,
-                'CheckStatus': checkout.CheckStatus if checkout.CheckStatus else 'N/A',
-                'CheckoutTotalPrice': checkout.TotalPrice if checkout.TotalPrice is not None else 0
+                # Checkin Details
+                'CheckinDetailsID': checkin_details.CheckinDetailsID,
             }
 
-            checkout_details_list.append(checkout_details)
+            all_checkin_details.append(checkin_info)
 
-        if not checkout_details_list:
-            return {'status': 'error', 'message': 'No checkout details found'}
+        if not all_checkin_details:
+            return {'status': 'error', 'message': 'No check-in details found'}
 
-        return {'status': 'success', 'checkout_details': checkout_details_list}
+        return {'status': 'success', 'checkin_details': all_checkin_details}
 
     except Exception as e:
         return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
+
+
+def get_check_in_details_by_id(data):
+    try:
+        # Handle if `data` is a dictionary (JSON-like input)
+        if isinstance(data, dict):
+            checkin_id = data.get('CheckinDetailsID')
+        else:
+            checkin_id = data
+
+        # Check if CheckinDetailsID is valid
+        if not checkin_id:
+            return {'status': 'error', 'message': 'CheckinDetailsID is missing or invalid'}
+
+        # Query the CheckinDetails table to verify if the record exists
+        checkin = CheckinDetails.query.filter_by(CheckinDetailsID=checkin_id).first()
+        if not checkin:
+            return {'status': 'error', 'message': f'Check-in details with ID {checkin_id} not found'}
+
+        # Query the Booking table to get the associated booking information
+        booking = Booking.query.filter_by(BookingID=checkin.BookingID).first()
+        if not booking:
+            return {'status': 'error', 'message': f'Booking not found for CheckinDetailsID {checkin_id}'}
+
+        # Query the Client table to get client information
+        client = Client.query.filter_by(ClientID=booking.ClientID).first()
+        if not client:
+            return {'status': 'error', 'message': f'Client not found for BookingID {booking.BookingID}'}
+
+        # Query the Payment table to get payment information for the booking
+        payment = Payment.query.filter_by(BookingID=booking.BookingID).first()
+        amount_paid = float(payment.Amount) if payment and isinstance(payment.Amount, Decimal) else float(0)
+
+        # Calculate duration, total cost, and handle None values
+        duration = booking.Duration if booking.Duration is not None else 0
+        total_price = booking.TotalPrice if booking.TotalPrice is not None else Decimal(0)
+        total_cost = float(total_price)  # Convert Decimal to float
+
+        # Prepare the full check-in details to be returned
+        check_in_details = {
+            # Client Details
+            'ClientID': client.ClientID,
+            'ClientName': client.FullName,
+            'Phone': client.Phone,
+
+            # Booking Details
+            'CheckinDate': booking.CheckinDate.strftime('%Y-%m-%d') if booking.CheckinDate else 'N/A',
+            'CheckoutDate': booking.CheckoutDate.strftime('%Y-%m-%d') if booking.CheckoutDate else 'N/A',
+            'Duration': duration,
+            'AdultsNumber': booking.AdultsNumber if booking.AdultsNumber is not None else 0,
+            'ChildrenNumber': booking.ChildrenNumber if booking.ChildrenNumber is not None else 0,
+            'RoomNumber': booking.RoomNumber if booking.RoomNumber is not None else 'N/A',
+
+            # Cost Details
+            'TotalCost': total_cost,
+            'AmountPaid': amount_paid,
+
+            # Check-in Details
+            'CheckinDetailsID': checkin.CheckinDetailsID,
+            'PaymentStatus': checkin.PaymentStatus if checkin.PaymentStatus else 'N/A'
+        }
+
+        return {'status': 'success', 'check_in_details': check_in_details}
+
+    except Exception as e:
+        return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
+
+
+def get_check_out_details():
+    """
+    Retrieve all checkout details for all check-outs in the database.
+
+    Returns:
+        dict: A dictionary containing the status and all checkout details.
+    """
+    try:
+        # Retrieve all checkout details from the CheckoutDetails table
+        checkout_details_list = CheckoutDetails.query.all()
+        if not checkout_details_list:
+            return {'status': 'error', 'message': 'No checkout details found'}
+
+        all_checkout_details = []
+
+        for checkout_details in checkout_details_list:
+            # Retrieve the associated booking
+            booking = Booking.query.filter_by(BookingID=checkout_details.BookingID).first()
+            if not booking:
+                continue  # Skip if no booking is found for the checkout details
+
+            # Retrieve the associated client
+            client = Client.query.filter_by(ClientID=booking.ClientID).first()
+            if not client:
+                continue  # Skip if no client is found for the booking
+
+            # Retrieve payment information
+            payment = Payment.query.filter_by(BookingID=booking.BookingID).first()
+            amount_paid = payment.Amount if payment else 0
+
+            # Handle None values for duration and TotalPrice
+            duration = booking.Duration if booking.Duration is not None else 0
+            total_price = booking.TotalPrice if booking.TotalPrice is not None else 0
+
+            # Convert Decimal values to float for JSON serialization
+            total_price = float(total_price) if isinstance(total_price, Decimal) else total_price
+            amount_paid = float(amount_paid) if isinstance(amount_paid, Decimal) else amount_paid
+
+            # Calculate total cost
+            total_cost = total_price
+
+            # Determine the payment status
+            payment_status = "Paid" if amount_paid >= total_cost else "30% Paid"
+
+            # Prepare the checkout details for the response
+            checkout_info = {
+                # Client Details
+                'ClientID': client.ClientID,
+                'ClientName': client.FullName,
+                'Phone': client.Phone,
+
+                # Booking Details
+                'CheckinDate': booking.CheckinDate.strftime('%Y-%m-%d') if booking.CheckinDate else 'N/A',
+                'CheckoutDate': booking.CheckoutDate.strftime('%Y-%m-%d') if booking.CheckoutDate else 'N/A',
+                'duration': duration,
+                'AdultsNumber': booking.AdultsNumber if booking.AdultsNumber is not None else 0,
+                'ChildrenNumber': booking.ChildrenNumber if booking.ChildrenNumber is not None else 0,
+
+                # Cost Details
+                'totalCost': float(total_cost) if isinstance(total_cost, Decimal) else total_cost,
+                'TotalPrice': float(amount_paid) if isinstance(amount_paid, Decimal) else amount_paid,
+
+                # Checkout Details
+                'CheckoutDetailsID': checkout_details.CheckoutDetailsID,
+                'MissingEquipment': checkout_details.MissingEquipment if checkout_details.MissingEquipment else 'N/A',
+                'BrokenEquipment': checkout_details.BrokenEquipment if checkout_details.BrokenEquipment else 'N/A',
+                'RestaurantFee': float(checkout_details.RestaurantFee) if isinstance(checkout_details.RestaurantFee,
+                                                                                     Decimal) else checkout_details.RestaurantFee if checkout_details.RestaurantFee is not None else 0,
+                'BarFee': float(checkout_details.BarFee) if isinstance(checkout_details.BarFee,
+                                                                       Decimal) else checkout_details.BarFee if checkout_details.BarFee is not None else 0,
+                'AdditionalFee': float(checkout_details.AdditionalFee) if isinstance(checkout_details.AdditionalFee,
+                                                                                     Decimal) else checkout_details.AdditionalFee if checkout_details.AdditionalFee is not None else 0,
+                'RoomServiceFee': float(checkout_details.RoomServiceFee) if isinstance(checkout_details.RoomServiceFee,
+                                                                                       Decimal) else checkout_details.RoomServiceFee if checkout_details.RoomServiceFee is not None else 0,
+                'CheckStatus': checkout_details.CheckStatus if checkout_details.CheckStatus else 'N/A',
+                'CheckoutTotalPrice': float(checkout_details.TotalPrice) if isinstance(checkout_details.TotalPrice,
+                                                                                       Decimal) else checkout_details.TotalPrice if checkout_details.TotalPrice is not None else 0
+            }
+
+            all_checkout_details.append(checkout_info)
+
+        if not all_checkout_details:
+            return {'status': 'error', 'message': 'No checkout details found'}
+
+        return {'status': 'success', 'checkout_details': all_checkout_details}
+
+    except Exception as e:
+        return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
+
+
+def get_check_out_details_by_id(data):
+    try:
+        # Handle if `data` is a dictionary (JSON-like input)
+        if isinstance(data, dict):
+            checkout_id = data.get('CheckoutDetailsID')
+        else:
+            checkout_id = data
+
+        # Check if CheckoutDetailsID is valid
+        if not checkout_id:
+            return {'status': 'error', 'message': 'CheckoutDetailsID is missing or invalid'}
+
+        # Query the CheckoutDetails table to verify if the record exists
+        checkout = CheckoutDetails.query.filter_by(CheckoutDetailsID=checkout_id).first()
+        if not checkout:
+            return {'status': 'error', 'message': f'Checkout details with ID {checkout_id} not found'}
+
+        # Query the Booking table to get the associated booking information
+        booking = Booking.query.filter_by(BookingID=checkout.BookingID).first()
+        if not booking:
+            return {'status': 'error', 'message': f'Booking not found for CheckoutDetailsID {checkout_id}'}
+
+        # Query the Client table to get client information
+        client = Client.query.filter_by(ClientID=booking.ClientID).first()
+        if not client:
+            return {'status': 'error', 'message': f'Client not found for BookingID {booking.BookingID}'}
+
+        # Query the Payment table to get payment information for the booking
+        payment = Payment.query.filter_by(BookingID=booking.BookingID).first()
+        amount_paid = float(payment.Amount) if payment and isinstance(payment.Amount, Decimal) else float(0)
+
+        # Calculate duration, total cost, and handle None values
+        duration = booking.Duration if booking.Duration is not None else 0
+        total_price = booking.TotalPrice if booking.TotalPrice is not None else Decimal(0)
+        total_cost = float(total_price)  # Convert Decimal to float
+
+        # Query the Room table to get Room details
+        room = Room.query.filter_by(RoomNumber=checkout.RoomNumber).first()
+
+        room_type_id = room.TypeID if room else 'N/A'
+
+        # Prepare the full checkout details to be returned
+        checkout_details = {
+            # Client Details
+            'ClientID': client.ClientID,
+            'ClientName': client.FullName,
+            'Phone': client.Phone,
+
+            # Booking Details
+            'CheckinDate': booking.CheckinDate.strftime('%Y-%m-%d') if booking.CheckinDate else 'N/A',
+            'CheckoutDate': booking.CheckoutDate.strftime('%Y-%m-%d') if booking.CheckoutDate else 'N/A',
+            'Duration': duration,
+            'AdultsNumber': booking.AdultsNumber if booking.AdultsNumber is not None else 0,
+            'ChildrenNumber': booking.ChildrenNumber if booking.ChildrenNumber is not None else 0,
+            'RoomNumber': booking.RoomNumber if booking.RoomNumber is not None else 'N/A',
+
+            # Cost Details
+            'TotalCost': total_cost,
+            'AmountPaid': amount_paid,
+
+            # Checkout Details
+            'CheckoutDetailsID': checkout.CheckoutDetailsID,
+            'MissingEquipment': checkout.MissingEquipment if checkout.MissingEquipment else 'N/A',
+            'BrokenEquipment': checkout.BrokenEquipment if checkout.BrokenEquipment else 'N/A',
+            'RestaurantFee': float(checkout.RestaurantFee) if isinstance(checkout.RestaurantFee,
+                                                                         Decimal) else checkout.RestaurantFee,
+            'BarFee': float(checkout.BarFee) if isinstance(checkout.BarFee, Decimal) else checkout.BarFee,
+            'AdditionalFee': float(checkout.AdditionalFee) if isinstance(checkout.AdditionalFee,
+                                                                         Decimal) else checkout.AdditionalFee,
+            'RoomServiceFee': float(checkout.RoomServiceFee) if isinstance(checkout.RoomServiceFee,
+                                                                           Decimal) else checkout.RoomServiceFee,
+            'CheckStatus': checkout.CheckStatus if checkout.CheckStatus else 'N/A',
+            'CheckoutTotalPrice': float(checkout.TotalPrice) if isinstance(checkout.TotalPrice,
+                                                                           Decimal) else checkout.TotalPrice
+        }
+
+        return {'status': 'success', 'checkout_details': checkout_details}
+
+    except Exception as e:
+        return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
+
+
+def approve_check_in_details(data):
+    """
+    Approves a check-in for a given CheckinDetailsID and updates the PaymentStatus to 'Paid'.
+
+    Parameters:
+        data (dict): A dictionary containing the CheckinDetailsID.
+
+    Returns:
+        dict: A response with the status of the operation.
+    """
+    # Extract the CheckinDetailsID from the data
+    checkin_details_id = data.get('CheckinDetailsID')
+    if not checkin_details_id:
+        return {'status': 'error', 'message': 'Missing CheckinDetailsID'}
+
+    try:
+        # Retrieve the check-in details associated with the CheckinDetailsID
+        checkin_details = CheckinDetails.query.filter_by(CheckinDetailsID=checkin_details_id).first()
+        if not checkin_details:
+            return {'status': 'error', 'message': 'CheckinDetails not found for the given CheckinDetailsID'}
+
+        # Retrieve the booking associated with this check-in details
+        booking = Booking.query.filter_by(BookingID=checkin_details.BookingID).first()
+        if not booking:
+            return {'status': 'error', 'message': 'Booking not found for the given CheckinDetailsID'}
+
+        # Retrieve the room associated with this booking
+        room = Room.query.filter_by(RoomNumber=booking.RoomNumber, HotelID=booking.HotelID).first()
+        if not room:
+            return {'status': 'error', 'message': 'Room not found'}
+
+        # Update the PaymentStatus to 'Paid'
+        checkin_details.PaymentStatus = 'Paid'
+        db.session.commit()
+
+        return {'status': 'success',
+                'message': f'PaymentStatus for CheckinDetailsID {checkin_details_id} has been updated to "Paid"'}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
 
 
 def approve_booking_requests(data):
@@ -611,7 +930,7 @@ def approve_booking_requests(data):
             return {'status': 'error', 'message': 'Room not found'}
 
         # Update the room's status to 'booked'
-        room.Status = 'booked'
+        room.Status = 'Booked'
         db.session.commit()
 
         return {'status': 'success', 'message': f'Room {room.RoomNumber} has been successfully booked'}
@@ -619,44 +938,22 @@ def approve_booking_requests(data):
         return {'status': 'error', 'message': str(e)}
 
 
-def approve_check_in_details(data):
-    # Extract the ClientID from the data
-    client_id = data.get('ClientID')
-    if not client_id:
-        return {'status': 'error', 'message': 'Missing ClientID'}
-
-    try:
-        # Retrieve the booking details associated with the ClientID
-        booking = Booking.query.filter_by(ClientID=client_id).first()
-        if not booking:
-            return {'status': 'error', 'message': 'Booking not found for the given ClientID'}
-
-        # Retrieve the Room associated with this booking
-        room = Room.query.filter_by(RoomNumber=booking.RoomNumber, HotelID=booking.HotelID).first()
-        if not room:
-            return {'status': 'error', 'message': 'Room not found'}
-
-        # Update the room's status to 'booked'
-        room.Status = 'booked'
-        db.session.commit()
-
-        return {'status': 'success',
-                'message': f'Room {room.RoomNumber} has been successfully booked for ClientID {client_id}'}
-    except Exception as e:
-        return {'status': 'error', 'message': str(e)}
-
-
 def approve_check_out_details(data):
-    # Extract the ClientID from the request data
-    client_id = data.get('ClientID')
-    if not client_id:
-        return {'status': 'error', 'message': 'Missing ClientID'}
+    # Extract the CheckoutDetailsID from the request data
+    checkout_details_id = data.get('CheckoutDetailsID')
+    if not checkout_details_id:
+        return {'status': 'error', 'message': 'Missing CheckoutDetailsID'}
 
     try:
-        # Retrieve the booking details associated with the ClientID
-        booking = Booking.query.filter_by(ClientID=client_id).first()
+        # Retrieve the checkout details associated with the CheckoutDetailsID
+        checkout_details = CheckoutDetails.query.filter_by(CheckoutDetailsID=checkout_details_id).first()
+        if not checkout_details:
+            return {'status': 'error', 'message': 'CheckoutDetails not found for the given CheckoutDetailsID'}
+
+        # Retrieve the booking details associated with the BookingID from CheckoutDetails
+        booking = Booking.query.filter_by(BookingID=checkout_details.BookingID).first()
         if not booking:
-            return {'status': 'error', 'message': 'Booking not found for the given ClientID'}
+            return {'status': 'error', 'message': 'Booking not found for the given CheckoutDetailsID'}
 
         # Retrieve the Room associated with this booking
         room = Room.query.filter_by(RoomNumber=booking.RoomNumber, HotelID=booking.HotelID).first()
@@ -668,80 +965,132 @@ def approve_check_out_details(data):
             return {'status': 'error', 'message': f'Room {room.RoomNumber} is not currently marked as booked'}
 
         # Update the room's status from 'booked' to 'available'
-        room.Status = 'available'
+        room.Status = 'Available'
         db.session.commit()
 
         return {'status': 'success',
-                'message': f'Room {room.RoomNumber} has been successfully marked as available for ClientID {client_id}'}
+                'message': f'Room {room.RoomNumber} has been successfully marked as available for CheckoutDetailsID {checkout_details_id}'}
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
 
 
-def cancel_check_in(ClientID):
-    if not ClientID:
-        return {'status': 'error', 'message': 'Missing ClientID'}
+def cancel_check_in(request):
+    # Extract the CheckinDetailsID from the request dictionary
+    checkin_details_id = request.get('CheckinDetailsID')
+
+    if not checkin_details_id:
+        return {'status': 'error', 'message': 'Missing CheckinDetailsID'}
 
     try:
-        # Query all bookings associated with the provided ClientID
-        bookings = Booking.query.filter_by(ClientID=ClientID).all()
+        # Retrieve the CheckinDetails associated with the provided CheckinDetailsID
+        checkin_details = CheckinDetails.query.filter_by(CheckinDetailsID=checkin_details_id).first()
 
-        if not bookings:
-            return {'status': 'error', 'message': 'No bookings found for this client'}
+        if not checkin_details:
+            return {'status': 'error', 'message': f'CheckinDetails with ID {checkin_details_id} not found'}
 
-        updated_rooms = []
+        # Retrieve the booking associated with the CheckinDetails
+        booking = Booking.query.filter_by(BookingID=checkin_details.BookingID).first()
 
-        for booking in bookings:
-            # Get the room associated with the booking
-            room = Room.query.filter_by(RoomNumber=booking.RoomNumber).first()
+        if not booking:
+            return {'status': 'error', 'message': f'Booking for CheckinDetailsID {checkin_details_id} not found'}
 
-            if not room:
-                return {'status': 'error', 'message': f'Room with RoomNumber {booking.RoomNumber} not found'}
+        # Retrieve the room associated with this booking
+        room = Room.query.filter_by(RoomNumber=booking.RoomNumber, HotelID=booking.HotelID).first()
 
-            # Check if the room is currently booked
-            if room.Status != 'booked':
-                continue  # If the room is not "booked", no need to update it
+        if not room:
+            return {'status': 'error', 'message': f'Room with RoomNumber {booking.RoomNumber} not found'}
 
-            # Update the room status to "free"
-            room.Status = 'free'
+        # Check if the room is currently booked
+        if room.Status != 'Booked':
+            return {'status': 'error', 'message': f'Room {room.RoomNumber} is not currently booked'}
 
-            # Save the room changes
-            db.session.commit()
+        # Update the room status to "free"
+        room.Status = 'Available'
 
-            updated_rooms.append(room.RoomNumber)
+        # Save the room changes
+        db.session.commit()
 
-        if not updated_rooms:
-            return {'status': 'error', 'message': 'No booked rooms were found for this client to cancel'}
-
-        return {'status': 'success', 'message': 'Check-in successfully canceled', 'updated_rooms': updated_rooms}
+        return {'status': 'success',
+                'message': f'Check-in for CheckinDetailsID {checkin_details_id} successfully canceled, Room {room.RoomNumber} is now available'}
 
     except Exception as e:
         db.session.rollback()  # Roll back the transaction if there is an error
         return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
 
-
-# Client Functions
-def get_city():
+#Roomboy Functions
+def get_room_details_for_room_boy():
     try:
-        # Query the City table to get all cities
-        cities = City.query.all()
+        # Perform a join query to get the required details
+        room_details = (
+            db.session.query(
+                Room.RoomNumber,
+                RoomType.Name.label('RoomTypeName'),
+                Booking.CheckoutDate,
+                Hotel.CheckOutTime,
+                CheckoutDetails.CheckStatus
+            )
+            .join(Booking, Room.RoomNumber == Booking.RoomNumber)
+            .join(Hotel, Room.HotelID == Hotel.HotelID)
+            .join(RoomType, Room.TypeID == RoomType.TypeID)
+            .join(CheckoutDetails, Booking.BookingID == CheckoutDetails.BookingID)
+            .filter(CheckoutDetails.CheckStatus.isnot(None))  # Include only rows with a CheckStatus
+            .all()
+        )
 
-        # If no cities are found, return an error message
-        if not cities:
-            return {'status': 'error', 'message': 'No cities found'}
+        # Prepare the data in a dictionary format
+        room_details_list = [
+            {
+                'RoomNumber': detail.RoomNumber,
+                'RoomType': detail.RoomTypeName,
+                'CheckoutDate': detail.CheckoutDate.strftime('%Y-%m-%d') if detail.CheckoutDate else 'N/A',
+                'CheckOutTime': detail.CheckOutTime.strftime('%H:%M:%S') if detail.CheckOutTime else 'N/A',
+                'CheckStatus': detail.CheckStatus,
+            }
+            for detail in room_details
+        ]
 
-        # Prepare the list of city names to be returned
-        city_names = [city.CityName for city in cities]
-
-        return {'status': 'success', 'cities': city_names}
-
+        return {'status': 'success', 'room_details': room_details_list}
     except Exception as e:
-        return {'status': 'error', 'message': str(e)}
+        return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
+
+def check_room(data):
+    # Extract the CheckoutDetailsID and validate it
+    checkout_details_id = data.get('CheckoutDetailsID')
+    if not checkout_details_id:
+        return {'status': 'error', 'message': 'Missing CheckoutDetailsID'}
+
+    try:
+        # Retrieve the checkout details record
+        checkout_details = CheckoutDetails.query.filter_by(CheckoutDetailsID=checkout_details_id).first()
+        if not checkout_details:
+            return {'status': 'error', 'message': 'CheckoutDetails not found'}
+
+        # Update the fees and equipment details
+        checkout_details.RestaurantFee = data.get('RestaurantFee', checkout_details.RestaurantFee)
+        checkout_details.BarFee = data.get('BarFee', checkout_details.BarFee)
+        checkout_details.RoomServiceFee = data.get('RoomServiceFee', checkout_details.RoomServiceFee)
+        checkout_details.MissingEquipment = data.get('MissingEquipment', checkout_details.MissingEquipment)
+        checkout_details.BrokenEquipment = data.get('BrokenEquipment', checkout_details.BrokenEquipment)
+        checkout_details.AdditionalFee = data.get('AdditionalFee', checkout_details.AdditionalFee)
+
+        # Update the CheckStatus to "checked"
+        checkout_details.CheckStatus = 'checked'
+
+        # Commit the changes to the database
+        db.session.commit()
+
+        return {'status': 'success', 'message': 'Room check successfully updated'}
+    except Exception as e:
+        # Rollback the session in case of an error
+        db.session.rollback()
+        return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
 
 
+# SysAdmin functions
 def get_hotels(city):
     try:
         # Query the Hotel table to find hotels in the specified city
-        hotels = Hotel.query.filter_by(city_name=city).all()
+        hotels = Hotel.query.filter_by(City=city).all()
 
         # If no hotels are found for the city, return an error message
         if not hotels:
@@ -749,11 +1098,11 @@ def get_hotels(city):
 
         # Prepare the list of hotel names to be returned
         hotel_list = [{
-            'hotel_name': hotel.name,
-            'hotel_id': hotel.hotel_id,
-            'city': hotel.city_name,
-            'address': hotel.address,
-            'rating': hotel.rating
+            'hotel_name': hotel.Name,
+            'hotel_id': hotel.HotelID,
+            'city': hotel.CityName,
+            'address': hotel.Address,
+            'rating': hotel.Rating
         } for hotel in hotels]
 
         return {'status': 'success', 'hotels': hotel_list}
@@ -762,275 +1111,159 @@ def get_hotels(city):
         return {'status': 'error', 'message': str(e)}
 
 
-def make_booking(data):
-    valid_fields = ['ClientID', 'HotelID', 'RoomType', 'AdultsNumber', 'ChildrenNumber', 'BabiesNumber', 'CheckinDate',
-                    'CheckoutDate']
-
-    # Filter the input data to include only valid fields
-    filtered_data = {key: data[key] for key in valid_fields if key in data}
-
-    # Check if all required fields are provided and not empty
-    required_fields = ['ClientID', 'HotelID', 'RoomType', 'AdultsNumber', 'CheckinDate', 'CheckoutDate']
-    if not all(field in filtered_data and filtered_data[field] for field in required_fields):
-        return {'status': 'error', 'message': 'Missing required fields'}
-
+def get_all_table_names():
     try:
-        # Parse and validate the dates
-        checkin_date = datetime.datetime.strptime(filtered_data['CheckinDate'], '%Y-%m-%d')
-        checkout_date = datetime.datetime.strptime(filtered_data['CheckoutDate'], '%Y-%m-%d')
-        if checkout_date <= checkin_date:
-            return {'status': 'error', 'message': 'Checkout date must be after the checkin date'}
+        # Use SQLAlchemy's inspector to get table names
+        inspector = inspect(db.engine)
+        table_names = inspector.get_table_names()
+        return {"status": "success", "table_names": table_names}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
-        # Check the availability of the room type
-        hotel_id = filtered_data['HotelID']
-        room_type = filtered_data['RoomType']
-        existing_booking = Booking.query.filter_by(
-            HotelID=hotel_id,
-            RoomType=room_type,
-            CheckinDate=checkin_date,
-            CheckoutDate=checkout_date
-        ).first()
-        if existing_booking:
-            return {'status': 'error', 'message': 'Selected room type is not available for the given dates'}
 
-        # Generate unique BookingID
-        while True:
-            random_booking_id = random.randint(1000, 9999)
-            existing_booking_id = Booking.query.filter_by(BookingID=random_booking_id).first()
-            if not existing_booking_id:
-                break
+def get_table_details(json_request):
+    try:
+        # Extract table name from the JSON request
+        table_name = json_request.get("table_name")
+        if not table_name:
+            return {"status": "error", "message": "Missing 'table_name' in request"}
 
-        # Add the BookingID to the data
-        filtered_data['BookingID'] = random_booking_id
+        # Dynamically construct the query to fetch all rows
+        query = text(f"SELECT * FROM {table_name}")
 
-        # Add the booking information to the database
-        booking = Booking(**filtered_data)
-        db.session.add(booking)
+        # Execute the query
+        result = db.session.execute(query)
+
+        # Fetch column names
+        columns = result.keys()
+
+        # Fetch all rows and convert them into a list of dictionaries
+        rows = [dict(zip(columns, row)) for row in result.fetchall()]
+
+        # Convert data to JSON-compatible format
+        json_data = json.loads(json.dumps(rows, cls=CustomJSONEncoder))
+
+        return {"status": "success", "data": json_data}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+def insert_into_table(json_request):
+    try:
+        # Extract table name and data from the JSON request
+        table_name = json_request.get("table_name")
+        data = json_request.get("data")  # Dictionary of column-value pairs
+
+        if not table_name:
+            return {"status": "error", "message": "Missing 'table_name' in request"}
+
+        if not data or not isinstance(data, dict):
+            return {"status": "error", "message": "Invalid or missing 'data' in request"}
+
+        # Dynamically construct the query to insert data
+        columns = ", ".join(data.keys())
+        values_placeholders = ", ".join([f":{key}" for key in data.keys()])
+
+        query = text(f"INSERT INTO {table_name} ({columns}) VALUES ({values_placeholders})")
+
+        # Execute the query
+        db.session.execute(query, data)
         db.session.commit()
 
-        return {'status': 'success', 'message': 'Booking successful', 'BookingID': random_booking_id}
+        return {"status": "success", "message": "Data inserted successfully"}
     except Exception as e:
-        return {'status': 'error', 'message': str(e)}
-
-
-def calculate_total_cost(data):
-    required_fields = ['HotelID', 'RoomType', 'AdultsNumber', 'ChildrenNumber', 'BabiesNumber', 'CheckinDate',
-                       'CheckoutDate']
-
-    # Ensure all required fields are provided and valid
-    if not all(field in data and data[field] for field in required_fields):
-        return {'status': 'error', 'message': 'Missing required fields'}
-
-    try:
-        # Extract fields from the input data
-        hotel_id = data['HotelID']
-        room_type = data['RoomType']
-        adults = int(data['AdultsNumber'])
-        children = int(data['ChildrenNumber'])
-        babies = int(data['BabiesNumber'])
-        checkin_date = datetime.datetime.strptime(data['CheckinDate'], '%Y-%m-%d')
-        checkout_date = datetime.datetime.strptime(data['CheckoutDate'], '%Y-%m-%d')
-
-        # Ensure valid dates
-        if checkout_date <= checkin_date:
-            return {'status': 'error', 'message': 'Checkout date must be after check-in date'}
-
-        # Calculate the number of days for the stay
-        total_days = (checkout_date - checkin_date).days
-
-        # Query the RoomType table to get pricing details for the specified RoomType and HotelID
-        room = RoomType.query.filter_by(HotelID=hotel_id, Name=room_type).first()
-        if not room:
-            return {'status': 'error', 'message': 'Invalid room type or room not found'}
-
-        # Extract price details from the RoomType table
-        price_per_adult = room.PriceAdult  # Price per adult per day
-        price_per_child = room.PriceChildren  # Price per child per day
-        price_per_baby = room.PriceBaby
-
-        # Calculate the total cost
-        total_cost = (price_per_adult * adults + price_per_child * children) * total_days
-
-        return {
-            'status': 'success',
-            'message': 'Cost calculated successfully',
-            'data': {
-                'TotalCost': total_cost,
-                'Details': {
-                    'Adults': adults,
-                    'Children': children,
-                    'Babies': babies,
-                    'RoomType': room_type,
-                    'PricePerAdult': price_per_adult,
-                    'PricePerChild': price_per_child,
-                    'Days': total_days
-                }
-            }
-        }
-
-    except Exception as e:
-        return {'status': 'error', 'message': str(e)}
-
-
-def process_payment(data):
-    # Validate required fields in the request
-    required_fields = ['BookingID', 'PaymentType', 'CardNumber', 'ExpiryDate', 'CVV']
-    if not all(field in data and data[field] for field in required_fields):
-        return {'status': 'error', 'message': 'Missing required fields'}
-
-    try:
-        # Extract the inputs
-        booking_id = data['BookingID']
-        payment_type = data['PaymentType']  # "full" or "30%"
-        card_number = data['CardNumber']
-        expiry_date = data['ExpiryDate']
-        cvv = data['CVV']
-
-        # Validate card details (optional: use external library or service)
-        if len(card_number) != 16 or not card_number.isdigit():
-            return {'status': 'error', 'message': 'Invalid card number'}
-        if len(cvv) != 3 or not cvv.isdigit():
-            return {'status': 'error', 'message': 'Invalid CVV'}
-        if not validate_expiry_date(expiry_date):
-            return {'status': 'error', 'message': 'Card has expired'}
-
-        # Fetch the booking details from the database
-        booking = Booking.query.filter_by(BookingID=booking_id).first()
-        if not booking:
-            return {'status': 'error', 'message': 'Invalid BookingID'}
-
-        total_amount = calculate_total_cost({
-            'HotelID': booking.HotelID,
-            'RoomType': booking.RoomType,
-            'AdultsNumber': booking.AdultsNumber,
-            'ChildrenNumber': booking.ChildrenNumber,
-            'BabiesNumber': booking.BabiesNumber,
-            'CheckinDate': booking.CheckinDate.strftime('%Y-%m-%d'),
-            'CheckoutDate': booking.CheckoutDate.strftime('%Y-%m-%d'),
-        })['data']['TotalCost']
-
-        # Determine the amount to pay based on payment type
-        paid_amount = total_amount if payment_type == 'full' else total_amount * 0.3
-
-        # Record the payment in the database (excluding sensitive card info)
-        payment = Payment(
-            BookingID=booking_id,
-            TotalAmount=total_amount,
-            PaidAmount=paid_amount,
-            PaymentStatus="Completed",
-            PaymentMethod="Credit Card",
-            TransactionDate=datetime.datetime.now()
-        )
-        db.session.add(payment)
-        db.session.commit()
-
-        # Return a success response
-        return {
-            'status': 'success',
-            'message': f'Payment of {"full cost" if payment_type == "full" else "30%"} completed successfully.',
-            'data': {
-                'BookingID': booking_id,
-                'PaidAmount': paid_amount,
-                'PaymentType': payment_type,
-                'TotalCost': total_amount
-            }
-        }
-
-    except Exception as e:
-        return {'status': 'error', 'message': str(e)}
-
-
-# Roomboy Functions
-def get_room_checking_status(data):
-    # Ensure the input contains RoomNumber
-    room_number = data.get('RoomNumber')
-    if not room_number:
-        return {'status': 'error', 'message': 'Missing RoomNumber'}
-
-    try:
-        # Query the Room table and join with CheckOutDetails
-        result = db.session.query(
-            db.Room.RoomNumber,
-            db.Room.TypeID,
-            db.CheckOutDetails.CheckoutDate,
-            db.Room.Status
-        ).outerjoin(db.CheckOutDetails, db.Room.RoomNumber == db.CheckOutDetails.RoomNumber).filter(
-            db.Room.RoomNumber == room_number
-        ).first()
-
-        # Check if the room exists
-        if not result:
-            return {'status': 'error', 'message': 'Room not found'}
-
-        # Prepare and return the response
-        response = {
-            'RoomNumber': result.RoomNumber,
-            'TypeID': result.TypeID,
-            'CheckoutDate': result.CheckoutDate.strftime('%Y-%m-%d') if result.CheckoutDate else None,
-            'Status': result.Status
-        }
-        return {'status': 'success', 'data': response}
-
-    except Exception as e:
-        return {'status': 'error', 'message': str(e)}
-
-
-def room_checking(data):
-    # Extract input from the front-end
-    room_number = data.get('RoomNumber')
-    restaurant_fee = data.get('RestaurantFee', 0.0)
-    bar_fee = data.get('BarFee', 0.0)
-    room_service_fee = data.get('RoomServiceFee', 0.0)
-    missing_equipment = data.get('MissingEquipment', None)
-    broken_equipment = data.get('BrokenEquipment', None)
-    additional_fees = data.get('AdditionalFees', 0.0)
-
-    if not room_number:
-        return {'status': 'error', 'message': 'Missing RoomNumber'}
-
-    try:
-        # Verify the room's existence
-        room = db.Room.query.filter_by(RoomNumber=room_number).first()
-        if not room:
-            return {'status': 'error', 'message': 'Room not found'}
-
-        # Query existing CheckOutDetails for this room
-        checkout_details = db.CheckOutDetails.query.filter_by(RoomNumber=room_number).first()
-
-        # If no CheckOutDetails exists, create a new one
-        if not checkout_details:
-            checkout_details = db.CheckOutDetails(
-                RoomNumber=room_number,
-                RestaurantFee=restaurant_fee,
-                BarFee=bar_fee,
-                RoomServiceFee=room_service_fee,
-                MissingEquipment=missing_equipment,
-                BrokenEquipment=broken_equipment,
-                TotalPrice=restaurant_fee + bar_fee + room_service_fee + additional_fees,
-                CheckoutDate=datetime.date.today()
-            )
-            db.session.add(checkout_details)
-        else:
-            # Update existing CheckOutDetails for the room
-            checkout_details.RestaurantFee = restaurant_fee
-            checkout_details.BarFee = bar_fee
-            checkout_details.RoomServiceFee = room_service_fee
-            checkout_details.MissingEquipment = missing_equipment
-            checkout_details.BrokenEquipment = broken_equipment
-            checkout_details.TotalPrice = (
-                    restaurant_fee + bar_fee + room_service_fee + additional_fees
-            )
-            checkout_details.CheckoutDate = datetime.date.today()  # Update check-out date
-
-        # Commit changes to the database
-        db.session.commit()
-
-        return {'status': 'success', 'message': 'Room checkout details updated successfully'}
-
-    except Exception as e:
-        # Handle potential errors during the database transaction
         db.session.rollback()
-        return {'status': 'error', 'message': str(e)}
+        return {"status": "error", "message": str(e)}
+
+
+def delete_from_table(json_request):
+    try:
+        # Extract table name and conditions from the JSON request
+        table_name = json_request.get("table_name")
+        conditions = json_request.get("conditions")  # Dictionary of column-value pairs for WHERE clause
+
+        if not table_name:
+            return {"status": "error", "message": "Missing 'table_name' in request"}
+
+        if not conditions or not isinstance(conditions, dict):
+            return {"status": "error", "message": "Invalid or missing 'conditions' in request"}
+
+        # Dynamically construct the WHERE clause
+        where_clause = " AND ".join([f"{key} = :{key}" for key in conditions.keys()])
+
+        # Get dependent tables and their foreign keys
+        query = text(f"""
+            SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_COLUMN_NAME
+            FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+            WHERE REFERENCED_TABLE_NAME = :table_name
+        """)
+        result = db.session.execute(query, {"table_name": table_name})
+        dependent_tables = result.mappings().all()  # Converts result to list of dictionaries
+
+        # Delete from dependent tables first
+        for dep_table in dependent_tables:
+            dep_table_name = dep_table["TABLE_NAME"]
+            dep_column_name = dep_table["COLUMN_NAME"]
+            referenced_column_name = dep_table["REFERENCED_COLUMN_NAME"]
+
+            # Construct delete query for dependent table
+            dep_query = text(f"""
+                DELETE FROM {dep_table_name}
+                WHERE {dep_column_name} IN (
+                    SELECT {referenced_column_name}
+                    FROM {table_name}
+                    WHERE {where_clause}
+                )
+            """)
+            db.session.execute(dep_query, conditions)
+
+        # Delete rows from the main table
+        delete_query = text(f"DELETE FROM {table_name} WHERE {where_clause}")
+        db.session.execute(delete_query, conditions)
+        db.session.commit()
+
+        return {"status": "success", "message": "Row(s) deleted successfully, including dependencies"}
+    except Exception as e:
+        db.session.rollback()
+        return {"status": "error", "message": str(e)}
+
+
+def update_table(json_request):
+    try:
+        # Extract table name, data to update, and conditions from the JSON request
+        table_name = json_request.get("table_name")
+        data = json_request.get("data")  # Dictionary of columns and new values
+        conditions = json_request.get("conditions")  # Dictionary of column-value pairs for WHERE clause
+
+        if not table_name:
+            return {"status": "error", "message": "Missing 'table_name' in request"}
+
+        if not data or not isinstance(data, dict):
+            return {"status": "error", "message": "Invalid or missing 'data' in request"}
+
+        if not conditions or not isinstance(conditions, dict):
+            return {"status": "error", "message": "Invalid or missing 'conditions' in request"}
+
+        # Dynamically construct the SET clause
+        set_clause = ", ".join([f"{key} = :{key}" for key in data.keys()])
+
+        # Dynamically construct the WHERE clause
+        where_clause = " AND ".join([f"{key} = :{key}" for key in conditions.keys()])
+
+        # Combine data and conditions into a single dictionary for parameter binding
+        parameters = {**data, **conditions}
+
+        # Construct the UPDATE query
+        query = text(f"UPDATE {table_name} SET {set_clause} WHERE {where_clause}")
+
+        # Execute the query
+        db.session.execute(query, parameters)
+        db.session.commit()
+
+        return {"status": "success", "message": "Row(s) updated successfully"}
+    except Exception as e:
+        db.session.rollback()
+        return {"status": "error", "message": str(e)}
 
 
 if __name__ == '__main__':
