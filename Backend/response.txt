@@ -1,1 +1,1 @@
-{"status": "success", "message": "Room check successfully updated"}
+{"status": "success", "booking_request": {"BookingID": 50888, "Client": {"ClientID": 406, "FullName": "mirzoyoqub", "DateOfBirth": "2000-01-01", "Address": "Main Street", "Phone": "+998940317775", "PassportSeries": "AB1234567", "Email": "mirzoyoqub@gmail.com", "Username": "mirzoyoqubcode"}, "HotelID": 2, "RoomNumber": 202, "AdultsNumber": 1, "ChildrenNumber": 0, "CheckinDate": "2024-12-25", "CheckoutDate": "2024-12-30", "TotalPrice": 32.0, "Duration": 5.0, "PaymentStatus": "N/A"}}

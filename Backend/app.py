@@ -59,6 +59,15 @@ with app.app_context():
 
     class City(db.Model):
         __table__ = db.Table('City', db.metadata, autoload_with=db.engine)
+# Custom JSON encoder for handling non-serializable types
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()  # Convert dates to ISO format
+        elif isinstance(obj, Decimal):
+            return float(obj)  # Convert Decimal to float
+        return super().default(obj)
+
 
 
 # Function to handle C server communication
@@ -98,6 +107,19 @@ def handle_c_server_connection(connection, address):
                     response = get_city()
                 elif request.get("action") == "get_hotels":
                     response = get_hotels(request)
+                elif request.get("action") == "get_hotel_by_city":
+                    response = get_hotel_by_city(request)
+
+                elif request.get("action") == "get_hotel_data":
+                    response = get_hotel_data(request)
+
+                elif request.get("action") == "booking":
+                    response = booking(request)
+
+                elif request.get("action") == "payment":
+                    response = payment(request)
+
+
 
 
                 # Manager functions
@@ -127,16 +149,44 @@ def handle_c_server_connection(connection, address):
 
                 elif request.get("action") == "cancel_check_in":
                     response = cancel_check_in(request)
-
                 elif request.get("action") == "approve_check_out_details":
                     response = approve_check_out_details(request)
+
+
+                # Assistant functions
+                elif request.get("action") == "update_rooms_list":
+                    response = update_rooms_list(request)
+
+                elif request.get("action") == "delete_room":
+                    response = delete_room(request)
+
+                elif request.get("action") == "get_rooms_list":
+                    response = get_rooms_list()
+
+                elif request.get("action") == "add_new_room":
+                    response = add_new_room(request)
+
+                elif request.get("action") == "get_room_types_info":
+                    response = get_room_types_info()
+
+                elif request.get("action") == "add_room_type":
+                    response = add_room_type(request)
+
+                elif request.get("action") == "update_basic_info":
+                    response = update_basic_info(request)
+
+                elif request.get("action") == "get_basic_information":
+                    response = get_basic_information()
+
+                elif request.get("action") == "update_room_type":
+                    response = update_room_type()
+
 
                 # Roomboy functions
                 elif request.get("action") == "get_room_details_for_room_boy":
                     response = get_room_details_for_room_boy()
-
-                elif request.get("action") == "check_room":
-                    response = check_room(request)
+                elif request.get("action") == "update_checkout_details":
+                    response = update_checkout_details(request)
 
 
                 # SysAdmin functions
@@ -192,16 +242,6 @@ def start_tcp_server():
         server_socket.close()
 
 
-# Custom JSON encoder for handling non-serializable types
-class CustomJSONEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, (datetime, date)):
-            return obj.isoformat()  # Convert dates to ISO format
-        elif isinstance(obj, Decimal):
-            return float(obj)  # Convert Decimal to float
-        return super().default(obj)
-
-
 # Flask handlers
 
 # Registration
@@ -219,7 +259,7 @@ def register_guest(data):
     try:
         # Generate unique ClientID
         while True:
-            random_client_id = random.randint(100, 999)
+            random_client_id = random.randint(100000, 999999)
             existing_client = Client.query.filter_by(ClientID=random_client_id).first()
             if not existing_client:
                 break
@@ -235,7 +275,6 @@ def register_guest(data):
         return {'status': 'success', 'message': 'Guest registered successfully', 'id': random_client_id}
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
-
 
 def register_guest_2(data):
     # Define the fields that are valid for this operation
@@ -265,7 +304,6 @@ def register_guest_2(data):
         return {'status': 'success', 'message': 'Guest credentials updated successfully'}
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
-
 
 def register_staff(data):
     # Define the fields that are valid for the Staff model
@@ -298,7 +336,6 @@ def register_staff(data):
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
 
-
 def register_staff_2(data):
     # Define the fields that are valid for this operation
     valid_fields = ['StaffID', 'Username', 'Password']
@@ -327,7 +364,6 @@ def register_staff_2(data):
         return {'status': 'success', 'message': 'Staff credentials updated successfully'}
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
-
 
 def login_guest(data):
     # Define the fields that are valid for this operation
@@ -363,7 +399,6 @@ def login_guest(data):
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
 
-
 def login_staff(data):
     # Define the fields that are valid for this operation
     valid_fields = ['Username', 'Password']
@@ -398,7 +433,6 @@ def login_staff(data):
         }
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
-
 
 def find_hotel(data):
     # Define the fields that are valid for the Hotel model
@@ -443,6 +477,247 @@ def get_city():
 
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
+
+def get_hotel_by_city(data):
+    # Define the fields that are valid for this operation
+    valid_fields = ['city']
+
+    # Filter the data to include only valid fields
+    filtered_data = {key: data[key] for key in valid_fields if key in data}
+
+    # Check if the required field 'city' is provided
+    if 'city' not in filtered_data or not filtered_data['city']:
+        return {'status': 'error', 'message': 'Missing or empty city name'}
+
+    try:
+        # Perform a case-insensitive search for hotels in the specified city
+        city = filtered_data['city']
+        hotels = Hotel.query.filter(Hotel.City.ilike(f"%{city}%")).limit(10).all()  # Limit results to 10
+
+        if not hotels:
+            return {'status': 'error', 'message': 'No hotels found in the specified city'}
+
+        # Prepare the response with essential fields
+        result = []
+        for hotel in hotels:
+            hotel_data = {
+                'HotelID': hotel.HotelID,
+                'Name': hotel.Name[:50],  # Truncate Name to 50 characters
+                'City': hotel.City,
+                'Stars': hotel.Stars,
+                'Address': hotel.Address
+            }
+            result.append(hotel_data)
+
+        return {'status': 'success', 'hotels': result}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+def get_hotel_data(data):
+    # Define the fields that are valid for this operation
+    valid_fields = ['HotelID']
+
+    # Filter the data to include only valid fields
+    filtered_data = {key: data[key] for key in valid_fields if key in data}
+
+    # Check if the required field 'HotelID' is provided
+    if 'HotelID' not in filtered_data or not filtered_data['HotelID']:
+        return {'status': 'error', 'message': 'Missing or empty HotelID'}
+
+    try:
+        # Fetch hotel data by HotelID
+        hotel = Hotel.query.filter_by(HotelID=filtered_data['HotelID']).first()
+        if not hotel:
+            return {'status': 'error', 'message': 'Hotel not found'}
+
+        # Fetch all room types for the given HotelID
+        room_types = RoomType.query.filter_by(HotelID=filtered_data['HotelID']).all()
+
+        # Prepare the response data
+        hotel_data = {
+            'HotelID': hotel.HotelID,
+            'Name': hotel.Name,
+            'City': hotel.City,
+            'Address': hotel.Address,
+            'Phone': hotel.Phone,
+            'Email': hotel.Email,
+            'Stars': hotel.Stars,
+            'Facilities': hotel.Facilities,
+            'CheckInTime': hotel.CheckInTime,
+            'CheckOutTime': hotel.CheckOutTime,
+            'Description': hotel.Description,
+        }
+
+        room_type_data = [
+            {
+                'TypeID': room.TypeID,
+                'Name': room.Name,
+                'Description': room.Description,
+                'Facility': room.Facility,
+                'PriceAdults': float(room.PriceAdults),  # Convert Decimal to float
+                'PriceChildren': float(room.PriceChildren),  # Convert Decimal to float
+                'PriceBabies': float(room.PriceBabies),  # Convert Decimal to float
+                'Capacity': room.Capacity,
+            }
+            for room in room_types
+        ]
+
+        return {'status': 'success', 'hotel': hotel_data, 'room_types': room_type_data}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+def booking(data):
+    # Define the fields that are valid for this operation
+    valid_fields = ['ClientID', 'HotelID', 'CheckinDate', 'CheckoutDate', 'AdultsNumber', 'ChildrenNumber', 'RoomType']
+
+    # Filter the data to include only valid fields
+    filtered_data = {key: data[key] for key in valid_fields if key in data}
+
+    # Check if all required fields are provided
+    if not all(field in filtered_data for field in valid_fields):
+        return {'status': 'error', 'message': 'Missing required fields'}
+
+    try:
+        # Step 0: Check for available rooms
+        hotel_id = filtered_data['HotelID']
+        room_type = filtered_data['RoomType']
+        available_room = Room.query.filter_by(HotelID=hotel_id, TypeID=room_type, Status='Available').first()
+
+        if not available_room:
+            return {'status': 'error', 'message': 'No available rooms for the selected room type'}
+
+        room_number = available_room.RoomNumber
+
+        # Step 1: Check if the number of guests fits the room's capacity
+        adults = filtered_data['AdultsNumber']
+        children = filtered_data['ChildrenNumber']
+        checkin_date = datetime.strptime(filtered_data['CheckinDate'], '%Y-%m-%d')
+        checkout_date = datetime.strptime(filtered_data['CheckoutDate'], '%Y-%m-%d')
+        duration = (checkout_date - checkin_date).days
+        room_capacity = RoomType.query.filter_by(TypeID=room_type, HotelID=hotel_id).first().Capacity
+
+        if not room_capacity:
+            return {'status': 'error', 'message': 'Invalid room type or capacity'}
+
+        if room_capacity < (float(adults) + 0.5 * float(children)):
+            return {'status': 'error', 'message': 'Too many guests for this room'}
+
+        # Step 2: Calculate TotalPrice
+        room_details = RoomType.query.filter_by(TypeID=room_type, HotelID=hotel_id).first()
+        price_adults = room_details.PriceAdults
+        price_children = room_details.PriceChildren
+        total_price = duration*(price_adults * adults + price_children * children)
+
+        # Step 3: Calculate the duration of stay
+
+
+        if duration <= 0:
+            return {'status': 'error', 'message': 'Invalid check-in and check-out dates'}
+
+        # Step 4: Add the booking to the database
+        # Generate a unique BookingID
+        while True:
+            booking_id = random.randint(10000, 99999)
+            existing_booking = Booking.query.filter_by(BookingID=booking_id).first()
+            if not existing_booking:
+                break
+
+        # Create a new booking record
+        new_booking = Booking(
+            BookingID=booking_id,
+            ClientID=filtered_data['ClientID'],
+            HotelID=hotel_id,
+            RoomNumber=room_number,
+            AdultsNumber=adults,
+            ChildrenNumber=children,
+            CheckinDate=checkin_date,
+            CheckoutDate=checkout_date,
+            Duration=duration,
+            TotalPrice=total_price
+        )
+        db.session.add(new_booking)
+
+        # Update room status to "Booked"
+        available_room.Status = 'Booked'
+        db.session.commit()
+
+        # Step 5: Return booking details
+        return {
+            'status': 'success',
+            'BookingID': booking_id,
+            'Duration': duration,
+            'TotalPrice': float(total_price),
+            'CheckinDate': checkin_date.strftime('%Y-%m-%d'),
+            'CheckoutDate': checkout_date.strftime('%Y-%m-%d')
+        }
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+def payment(data):
+    # Define the fields that are valid for this operation
+    valid_fields = ['BookingID', 'PaymentMethod', 'Amount']
+
+    # Filter the data to include only valid fields
+    filtered_data = {key: data[key] for key in valid_fields if key in data}
+
+    # Check if all required fields are provided
+    if not all(field in filtered_data for field in valid_fields):
+        return {'status': 'error', 'message': 'Missing required fields'}
+
+    try:
+        # Check if the BookingID exists in the Booking table
+        booking = Booking.query.filter_by(BookingID=filtered_data['BookingID']).first()
+        if not booking:
+            return {'status': 'error', 'message': 'Invalid BookingID'}
+
+        # Fetch the TotalPrice from the booking
+        total_price = float(booking.TotalPrice)
+
+        # Verify the payment amount based on the PaymentMethod
+        payment_method = filtered_data['PaymentMethod']
+        amount = float(filtered_data['Amount'])
+
+        if payment_method == 'pay full price':
+            if amount != total_price:
+                return {'status': 'error', 'message': 'Payment amount does not match full price'}
+        elif payment_method == 'pay 30%':
+            expected_amount = round(total_price * 0.3, 2)  # Calculate 30% of the total price
+            if amount != expected_amount:
+                return {'status': 'error', 'message': f'Payment amount must be 30% of total price: {expected_amount}'}
+        else:
+            return {'status': 'error', 'message': 'Invalid payment method'}
+
+        # Generate a unique PaymentID
+        while True:
+            payment_id = random.randint(10000, 99999)
+            existing_payment = Payment.query.filter_by(PaymentID=payment_id).first()
+            if not existing_payment:
+                break
+
+        # Add the payment to the Payment table
+        new_payment = Payment(
+            PaymentID=payment_id,
+            BookingID=filtered_data['BookingID'],
+            Amount=amount,
+            PaymentDate=datetime.now().date(),
+            PaymentMethod=payment_method
+        )
+        db.session.add(new_payment)
+        db.session.commit()
+
+        # Return success status
+        return {
+            'status': 'success',
+            'message': 'Payment completed successfully',
+            'PaymentID': payment_id,
+            'BookingID': filtered_data['BookingID'],
+            'Amount': amount,
+            'PaymentDate': datetime.now().date().strftime('%Y-%m-%d'),
+            'PaymentMethod': payment_method
+        }
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
 
 
 # Manager Functions
@@ -493,7 +768,6 @@ def get_booking_request():
 
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
-
 
 def get_booking_request_by_id(data):
     """
@@ -929,12 +1203,47 @@ def approve_booking_requests(data):
         if not room:
             return {'status': 'error', 'message': 'Room not found'}
 
-        # Update the room's status to 'booked'
-        room.Status = 'Booked'
+        # Retrieve the RoomType using Room's TypeID
+        room_type = RoomType.query.filter_by(TypeID=room.TypeID, HotelID=booking.HotelID).first()
+        if not room_type:
+            return {'status': 'error', 'message': 'Room Type not found'}
+
+        # Retrieve the PaymentMethod from the Payment table based on BookingID
+        payment = Payment.query.filter_by(BookingID=booking.BookingID).first()
+        if not payment:
+            return {'status': 'error', 'message': 'Payment information not found'}
+
+        while True:
+            id = random.randint(10000, 99999)
+            existing_booking = CheckoutDetails.query.filter_by(CheckoutDetailsID=id).first()
+            if not existing_booking:
+                break
+
+        # Insert entry into checkindetails table with PaymentStatus from PaymentMethod
+        checkin_detail = CheckinDetails(
+            ClientID=booking.ClientID,
+            BookingID=booking.BookingID,
+            TypeID=room_type.TypeID,  # From RoomType
+            Rooms=1,  # Assuming 1 room per booking, adjust if needed
+            PaymentStatus=payment.PaymentMethod  # Set PaymentStatus based on PaymentMethod
+        )
+        db.session.add(checkin_detail)
+
+        # Insert entry into checkoutdetails table
+        checkout_detail = CheckoutDetails(
+            CheckoutDetailsID=id,
+            BookingID=booking.BookingID,
+            RoomNumber=booking.RoomNumber
+        )
+        db.session.add(checkout_detail)
+
+        # Commit the changes to the database
         db.session.commit()
 
-        return {'status': 'success', 'message': f'Room {room.RoomNumber} has been successfully booked'}
+        return {'status': 'success', 'message': f'Booking {booking.BookingID} has been successfully processed'}
+
     except Exception as e:
+        db.session.rollback()  # Rollback in case of an error
         return {'status': 'error', 'message': str(e)}
 
 
@@ -972,7 +1281,6 @@ def approve_check_out_details(data):
                 'message': f'Room {room.RoomNumber} has been successfully marked as available for CheckoutDetailsID {checkout_details_id}'}
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
-
 
 def cancel_check_in(request):
     # Extract the CheckinDetailsID from the request dictionary
@@ -1017,69 +1325,488 @@ def cancel_check_in(request):
         db.session.rollback()  # Roll back the transaction if there is an error
         return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
 
-#Roomboy Functions
-def get_room_details_for_room_boy():
+# Assistant functions
+def get_basic_information():
+    """
+    Retrieves basic information about the hotel, including description, address, phone number,
+    stars, facilities, check-in time, and check-out time.
+
+    Returns:
+        dict: A dictionary containing the status and hotel information.
+    """
     try:
-        # Perform a join query to get the required details
-        room_details = (
-            db.session.query(
-                Room.RoomNumber,
-                RoomType.Name.label('RoomTypeName'),
-                Booking.CheckoutDate,
-                Hotel.CheckOutTime,
-                CheckoutDetails.CheckStatus
-            )
-            .join(Booking, Room.RoomNumber == Booking.RoomNumber)
-            .join(Hotel, Room.HotelID == Hotel.HotelID)
-            .join(RoomType, Room.TypeID == RoomType.TypeID)
-            .join(CheckoutDetails, Booking.BookingID == CheckoutDetails.BookingID)
-            .filter(CheckoutDetails.CheckStatus.isnot(None))  # Include only rows with a CheckStatus
-            .all()
-        )
+        # Query the Hotel table to get the required fields
+        hotel_info = db.session.query(
+            Hotel.Description,
+            Hotel.Address,
+            Hotel.Phone,
+            Hotel.Stars,
+            Hotel.Facilities,
+            Hotel.CheckInTime,
+            Hotel.CheckOutTime
+        ).first()  # Assuming there's only one hotel entry, if more, you need to handle that
 
-        # Prepare the data in a dictionary format
-        room_details_list = [
-            {
-                'RoomNumber': detail.RoomNumber,
-                'RoomType': detail.RoomTypeName,
-                'CheckoutDate': detail.CheckoutDate.strftime('%Y-%m-%d') if detail.CheckoutDate else 'N/A',
-                'CheckOutTime': detail.CheckOutTime.strftime('%H:%M:%S') if detail.CheckOutTime else 'N/A',
-                'CheckStatus': detail.CheckStatus,
+        # Check if hotel information is found
+        if hotel_info:
+            # Format and return the data
+            return {
+                'status': 'success',
+                'hotel_info': {
+                    'Hotel Description': hotel_info.Description if hotel_info.Description else 'N/A',
+                    'Address': hotel_info.Address if hotel_info.Address else 'N/A',
+                    'Phone': hotel_info.Phone if hotel_info.Phone else 'N/A',
+                    'Stars': hotel_info.Stars if hotel_info.Stars else 'N/A',
+                    'Facility': hotel_info.Facilities if hotel_info.Facilities else 'N/A',
+                    'Check In Time': hotel_info.CheckInTime if hotel_info.CheckInTime else 'N/A',
+                    'Check Out Time': hotel_info.CheckOutTime if hotel_info.CheckOutTime else 'N/A'
+                }
             }
-            for detail in room_details
-        ]
-
-        return {'status': 'success', 'room_details': room_details_list}
+        else:
+            return {'status': 'error', 'message': 'Hotel information not found'}
     except Exception as e:
         return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
 
-def check_room(data):
-    # Extract the CheckoutDetailsID and validate it
-    checkout_details_id = data.get('CheckoutDetailsID')
-    if not checkout_details_id:
-        return {'status': 'error', 'message': 'Missing CheckoutDetailsID'}
+def update_basic_info(data):
+    """
+    Updates the details of a room type in the RoomType table.
+
+    Parameters:
+        data (dict): A dictionary containing the TypeID and new values for the room type fields.
+        Expected keys:
+            - TypeID: ID of the room type to update
+            - Description: New description for the room type
+            - Facility: New facility information for the room type
+            - PriceAdults: New price for adults in the room type
+            - PriceChildren: New price for children in the room type
+            - PriceBabies: New price for babies in the room type
+            - Capacity: New capacity for the room type
+
+    Returns:
+        dict: A dictionary containing the status of the operation.
+    """
+    # Extract data from the input dictionary
+    type_id = data.get('TypeID')
+    description = data.get('Description')
+    facility = data.get('Facility')
+    price_adults = data.get('PriceAdults')
+    price_children = data.get('PriceChildren')
+    price_babies = data.get('PriceBabies')
+    capacity = data.get('Capacity')
+
+    if not type_id:
+        return {'status': 'error', 'message': 'Missing TypeID'}
 
     try:
-        # Retrieve the checkout details record
-        checkout_details = CheckoutDetails.query.filter_by(CheckoutDetailsID=checkout_details_id).first()
-        if not checkout_details:
-            return {'status': 'error', 'message': 'CheckoutDetails not found'}
+        # Retrieve the RoomType object based on TypeID
+        room_type = RoomType.query.filter_by(TypeID=type_id).first()
+        if not room_type:
+            return {'status': 'error', 'message': 'RoomType not found'}
 
-        # Update the fees and equipment details
-        checkout_details.RestaurantFee = data.get('RestaurantFee', checkout_details.RestaurantFee)
-        checkout_details.BarFee = data.get('BarFee', checkout_details.BarFee)
-        checkout_details.RoomServiceFee = data.get('RoomServiceFee', checkout_details.RoomServiceFee)
-        checkout_details.MissingEquipment = data.get('MissingEquipment', checkout_details.MissingEquipment)
-        checkout_details.BrokenEquipment = data.get('BrokenEquipment', checkout_details.BrokenEquipment)
-        checkout_details.AdditionalFee = data.get('AdditionalFee', checkout_details.AdditionalFee)
-
-        # Update the CheckStatus to "checked"
-        checkout_details.CheckStatus = 'checked'
+        # Update the fields with new values
+        if description is not None:
+            room_type.Description = description
+        if facility is not None:
+            room_type.Facility = facility
+        if price_adults is not None:
+            room_type.PriceAdults = price_adults
+        if price_children is not None:
+            room_type.PriceChildren = price_children
+        if price_babies is not None:
+            room_type.PriceBabies = price_babies
+        if capacity is not None:
+            room_type.Capacity = capacity
 
         # Commit the changes to the database
         db.session.commit()
 
-        return {'status': 'success', 'message': 'Room check successfully updated'}
+        return {'status': 'success', 'message': f'RoomType with ID {type_id} updated successfully'}
+
+    except Exception as e:
+        # In case of an error, rollback the transaction
+        db.session.rollback()
+        return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
+
+def add_room_type(data):
+    """
+    Inserts a new room type into the RoomType table.
+
+    Parameters:
+        data (dict): A dictionary containing HotelID, Name, Description, Facility,
+                     PriceAdults, PriceChildren, PriceBaby, and Capacity.
+
+    Returns:
+        dict: A dictionary with the status of the operation.
+    """
+    try:
+        # Extract required fields from the input dictionary
+        hotel_id = data.get('HotelID')
+        name = data.get('Name')
+        description = data.get('Description', '')
+        facility = data.get('Facility', '')
+        price_adults = data.get('PriceAdults')
+        price_children = data.get('PriceChildren')
+        price_baby = data.get('PriceBaby')
+        capacity = data.get('Capacity')
+
+        # Validate mandatory fields
+        if not hotel_id or not name or not price_adults or not price_children or not price_baby or not capacity:
+            return {'status': 'error', 'message': 'Missing required fields'}
+
+        # Create a new RoomType instance
+        new_room_type = RoomType(
+            HotelID=hotel_id,
+            Name=name,
+            Description=description,
+            Facility=facility,
+            PriceAdults=price_adults,
+            PriceChildren=price_children,
+            PriceBabies=price_baby,
+            Capacity=capacity
+        )
+
+        # Add the new room type to the database
+        db.session.add(new_room_type)
+        db.session.commit()
+
+        return {'status': 'success', 'message': 'Room type added successfully'}
+
+    except Exception as e:
+        db.session.rollback()  # Rollback in case of an error
+        return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
+
+def get_room_types_info():
+    """
+    Retrieves information about room types, including Name, Description, Facility,
+    PriceAdults, PriceChildren, PriceBabies, and Capacity.
+
+    Returns:
+        dict: A dictionary containing the status and the list of room type information.
+    """
+    try:
+        # Query the RoomType table to get the required details
+        room_types = (
+            db.session.query(
+                RoomType.Name,
+                RoomType.Description,
+                RoomType.Facility,
+                RoomType.PriceAdults,
+                RoomType.PriceChildren,
+                RoomType.PriceBabies,
+                RoomType.Capacity
+            ).all()
+        )
+
+        # Format the query results into a list of dictionaries
+        room_types_list = [
+            {
+                'Name': room_type.Name,
+                'Description': room_type.Description if room_type.Description else 'N/A',
+                'Facility': room_type.Facility if room_type.Facility else 'N/A',
+                'PriceAdults': float(room_type.PriceAdults) if room_type.PriceAdults else 0.0,
+                'PriceChildren': float(room_type.PriceChildren) if room_type.PriceChildren else 0.0,
+                'PriceBabies': float(room_type.PriceBabies) if room_type.PriceBabies else 0.0,
+                'Capacity': room_type.Capacity if room_type.Capacity else 0
+            }
+            for room_type in room_types
+        ]
+
+        return {'status': 'success', 'room_types': room_types_list}
+    except Exception as e:
+        return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
+
+def update_room_type(data):
+    """
+    Updates an existing room type in the RoomType table.
+
+    Parameters:
+        data (dict): A dictionary containing TypeID and the fields to update such as
+                     Name, Description, Facility, PriceAdults, PriceChildren, PriceBabies, Capacity.
+
+    Returns:
+        dict: A dictionary with the status of the operation.
+    """
+    try:
+        # Extract the TypeID from the input dictionary
+        type_id = data.get('TypeID')
+
+        if not type_id:
+            return {'status': 'error', 'message': 'Missing TypeID'}
+
+        # Retrieve the existing room type record based on TypeID
+        room_type = RoomType.query.filter_by(TypeID=type_id).first()
+
+        if not room_type:
+            return {'status': 'error', 'message': 'RoomType not found'}
+
+        # Update the fields if they are provided in the input data
+        room_type.Name = data.get('Name', room_type.Name)
+        room_type.Description = data.get('Description', room_type.Description)
+        room_type.Facility = data.get('Facility', room_type.Facility)
+        room_type.PriceAdults = data.get('PriceAdults', room_type.PriceAdults)
+        room_type.PriceChildren = data.get('PriceChildren', room_type.PriceChildren)
+        room_type.PriceBabies = data.get('PriceBabies', room_type.PriceBabies)
+        room_type.Capacity = data.get('Capacity', room_type.Capacity)
+
+        # Commit the changes to the database
+        db.session.commit()
+
+        return {'status': 'success', 'message': 'Room type updated successfully'}
+
+    except Exception as e:
+        db.session.rollback()  # Rollback in case of an error
+        return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
+
+def add_new_room(data):
+    """
+    Inserts a new room into the Room table.
+
+    Parameters:
+        data (dict): A dictionary containing RoomNumber and Name (from the RoomType table).
+
+    Returns:
+        dict: A dictionary with the status of the operation.
+    """
+    try:
+        # Extract required fields from the input dictionary
+        room_number = data.get('RoomNumber')
+        room_type_name = data.get('Name')
+
+        # Validate mandatory fields
+        if not room_number or not room_type_name:
+            return {'status': 'error', 'message': 'Missing RoomNumber or RoomType Name'}
+
+        # Retrieve the RoomType based on the provided Name
+        room_type = RoomType.query.filter_by(Name=room_type_name).first()
+        if not room_type:
+            return {'status': 'error', 'message': f'RoomType with Name "{room_type_name}" not found'}
+
+        # Create a new Room instance
+        new_room = Room(
+            RoomNumber=room_number,
+            TypeID=room_type.TypeID,  # Assuming Room table references RoomType via TypeID
+            HotelID=room_type.HotelID  # Copy HotelID from RoomType
+        )
+
+        # Add the new room to the database
+        db.session.add(new_room)
+        db.session.commit()
+
+        return {'status': 'success', 'message': f'Room {room_number} of type "{room_type_name}" added successfully'}
+
+    except Exception as e:
+        db.session.rollback()  # Rollback in case of an error
+        return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
+
+def get_rooms_list():
+    """
+    Retrieves a list of rooms along with their RoomNumber, Name, Status, and Capacity.
+
+    Returns:
+        dict: A dictionary containing the status and a list of rooms information.
+    """
+    try:
+        # Perform a join query to retrieve the required data
+        rooms_info = (
+            db.session.query(
+                Room.RoomNumber,
+                RoomType.Name,
+
+            )
+            .join(RoomType, Room.TypeID == RoomType.TypeID)
+            .all()
+        )
+
+        # Prepare the data in a dictionary format
+        rooms_list = []
+        for room_number, name in rooms_info:
+            rooms_list.append({
+                'RoomNumber': room_number,
+                'Name': name,
+
+            })
+
+        return {'status': 'success', 'rooms': rooms_list}
+    except Exception as e:
+        return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
+
+def delete_room(data):
+    """
+    Deletes a room based on the provided RoomNumber and Name.
+
+    Parameters:
+        data (dict): A dictionary containing 'RoomNumber' and 'Name' of the room to be deleted.
+
+    Returns:
+        dict: A dictionary containing the status of the operation.
+    """
+    try:
+        # Extract RoomNumber and Name from the provided data
+        room_number = data.get('RoomNumber')
+        name = data.get('Name')
+
+        if not room_number or not name:
+            return {'status': 'error', 'message': 'Missing RoomNumber or Name in the request'}
+
+        # Perform a join query to find the room to delete
+        room_to_delete = (
+            db.session.query(Room)
+            .join(RoomType, Room.TypeID == RoomType.TypeID)
+            .filter(Room.RoomNumber == room_number, RoomType.Name == name)
+            .first()
+        )
+
+        if not room_to_delete:
+            return {'status': 'error', 'message': 'Room not found with the provided RoomNumber and Name'}
+
+        # Delete the room from the database
+        db.session.delete(room_to_delete)
+        db.session.commit()
+
+        return {'status': 'success', 'message': f'Room {room_number} with Name "{name}" has been successfully deleted'}
+    except Exception as e:
+        db.session.rollback()  # Roll back the transaction in case of an error
+        return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
+
+def update_rooms_list(data):
+    """
+    Updates details of an existing room in the Room table.
+
+    Parameters:
+        data (dict): A dictionary containing the RoomNumber and fields to update.
+                     Expected keys include RoomNumber, Name (from RoomType), and Status (for Room).
+
+    Returns:
+        dict: A dictionary with the status of the operation.
+    """
+    try:
+        # Extract required fields from the input dictionary
+        room_number = data.get('RoomNumber')
+        room_type_name = data.get('Name')
+        status = data.get('Status')
+
+        # Validate mandatory fields
+        if not room_number:
+            return {'status': 'error', 'message': 'Missing RoomNumber'}
+
+        # Retrieve the room record based on RoomNumber
+        room = Room.query.filter_by(RoomNumber=room_number).first()
+
+        if not room:
+            return {'status': 'error', 'message': f'Room with RoomNumber {room_number} not found'}
+
+        # If a new RoomType Name is provided, update the TypeID
+        if room_type_name:
+            room_type = RoomType.query.filter_by(Name=room_type_name).first()
+            if not room_type:
+                return {'status': 'error', 'message': f'RoomType with Name "{room_type_name}" not found'}
+            room.TypeID = room_type.TypeID  # Update TypeID based on the RoomType Name
+
+        # If status is provided, update it
+        if status:
+            room.Status = status
+
+        # Commit the changes to the database
+        db.session.commit()
+
+        return {'status': 'success', 'message': f'Room {room_number} updated successfully'}
+
+    except Exception as e:
+        db.session.rollback()  # Rollback in case of an error
+        return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
+
+
+#Roomboy Functions
+def get_room_details_for_room_boy():
+    try:
+        # Perform a join query to fetch the required details
+        room_checkout_details = (
+            db.session.query(
+                CheckoutDetails.CheckoutDetailsID,
+                Room.RoomNumber,
+                RoomType.Name.label('RoomTypeName'),
+                Hotel.CheckOutTime,
+                Booking.CheckoutDate,
+                CheckoutDetails.CheckStatus
+            )
+            .join(RoomType, Room.TypeID == RoomType.TypeID)
+            .join(Booking, Room.RoomNumber == Booking.RoomNumber)
+            .join(CheckoutDetails, Booking.BookingID == CheckoutDetails.BookingID)
+            .join(Hotel, Room.HotelID == Hotel.HotelID)
+            .all()
+        )
+
+        # Prepare the data in a dictionary format
+        checkout_details_list = [
+            {
+                'CheckoutDetailsID' : detail.CheckoutDetailsID,
+                'RoomNumber': detail.RoomNumber,
+                'Name': detail.RoomTypeName,
+                'CheckOutTime': detail.CheckOutTime if detail.CheckOutTime else 'N/A',
+                'CheckoutDate': detail.CheckoutDate.strftime('%Y-%m-%d') if detail.CheckoutDate else 'N/A',
+                'CheckStatus': detail.CheckStatus
+            }
+            for detail in room_checkout_details
+        ]
+
+        return {'status': 'success', 'data': checkout_details_list}
+    except Exception as e:
+        return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
+
+def update_checkout_details(input_data):
+    # Extract the CheckoutDetailsID and data from input_data
+    checkout_details_id = input_data.get('CheckoutDetailsID')
+    if not checkout_details_id:
+        return {'status': 'error', 'message': 'Missing CheckoutDetailsID'}
+
+    data = input_data.get('data', {})
+
+    try:
+        # Retrieve the CheckoutDetails record
+        checkout_details = CheckoutDetails.query.filter_by(CheckoutDetailsID=checkout_details_id).first()
+
+        if not checkout_details:
+            return {'status': 'error', 'message': 'CheckoutDetails not found'}
+
+        # Check the current status
+        if checkout_details.CheckStatus == 'checked':
+            return {'status': 'success', 'message': 'CheckoutDetails is already checked'}
+
+        # If CheckStatus is 'not checked', update the details
+        if checkout_details.CheckStatus == 'Not checked':
+            if not data:
+                return {'status': 'error', 'message': 'Missing input data for updating CheckoutDetails'}
+
+            # Update columns based on the provided data
+            checkout_details.MissingEquipment = data.get('MissingEquipment', checkout_details.MissingEquipment)
+            checkout_details.BrokenEquipment = data.get('BrokenEquipment', checkout_details.BrokenEquipment)
+            checkout_details.RestaurantFee = data.get('RestaurantFee', checkout_details.RestaurantFee)
+            checkout_details.BarFee = data.get('BarFee', checkout_details.BarFee)
+            checkout_details.AdditionalFee = data.get('AdditionalFee', checkout_details.AdditionalFee)
+            checkout_details.RoomServiceFee = data.get('RoomServiceFee', checkout_details.RoomServiceFee)
+
+            # Calculate the total price
+            restaurant_fee = data.get('RestaurantFee', 0) or 0
+            bar_fee = data.get('BarFee', 0) or 0
+            additional_fee = data.get('AdditionalFee', 0) or 0
+            room_service_fee = data.get('RoomServiceFee', 0) or 0
+
+            # Fetch the total price from Booking table
+            booking = Booking.query.filter_by(BookingID=checkout_details.BookingID).first()
+            if not booking:
+                return {'status': 'error', 'message': 'Booking record not found'}
+
+            booking_total_price = booking.TotalPrice or 0
+            total_price = restaurant_fee + bar_fee + additional_fee + room_service_fee + booking_total_price
+
+            checkout_details.TotalPrice = total_price
+
+            # Update the CheckStatus to 'checked'
+            checkout_details.CheckStatus = 'checked'
+
+            # Commit the changes to the database
+            db.session.commit()
+
+            return {'status': 'success', 'message': 'CheckoutDetails successfully updated and checked'}
     except Exception as e:
         # Rollback the session in case of an error
         db.session.rollback()
